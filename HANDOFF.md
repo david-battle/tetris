@@ -2,9 +2,9 @@
 
 State as of 2026-10-14. Working tree clean; latest commits:
 
-- `21ab68a` Add handoff notes
-- `1929d5f` Auto-repeat hard drop while SPACE held in easy mode
-- `ce5369c` Add G key to toggle the hard-drop ghost piece
+- `ae01e17` Add hint key, cheat mode (Ctrl mirror), and paused badge
+- `3a92db2` Record badge/CONTROLS layout caveat in handoff notes
+- `7561f88` Add autoplay mode; gate ghost extras and add mode badges
 
 Build/run: `make` (must stay warning-clean under `-Wall -Wextra`), `./run.sh`.
 
@@ -26,16 +26,36 @@ Build/run: `make` (must stay warning-clean under `-Wall -Wextra`), `./run.sh`.
   ghost cells and the pending-line-clear row highlight are gated by it.
 - Easy on: holding SPACE re-drops each newly spawned piece every 0.25s
   (`dropRepeat`, tetris.c ~330). Easy off: one hard drop per press, unchanged.
+- `H` hint: snaps the live piece to the easy-mode best placement (orientation
+  + column, reusing `easyBestDrop`) without dropping it; skipped if that
+  would collide at the piece's current height. Works regardless of easy mode.
+- `C` toggles cheat mode (`cheat`); its badge is a third switch-style one.
+  While on, either Ctrl key runs `mirrorShape()` on the live piece: cells flip
+  left-right within the piece's own (centered) grid, and the piece becomes its
+  mirror partner — J<->L and S<->Z, with the partner's type/color (the
+  function returns the new type). I/O are mirror-symmetric so skipped; T does
+  a 180 turn instead (feedback on a tap). Skipped if the mirrored shape would
+  collide at the current spot.
 - `A` toggles autoplay (`autoPlay`): forces easy on + ghost off, then hard
   drops the easy-best placement every 0.125s (double the SPACE-hold rate)
   with no key held. Pressing `E` to turn easy off also clears autoplay;
-  toggling autoplay off leaves easy/ghost as-is. EASY/GHOST badges always
-  show ON/OFF; AUTOPLAY badge only shows while active.
-- Layout caveat: the badges stack from `oy + 5*cell` downward (each
-  `mfs + 8` tall) while CONTROLS starts at `oy + 7*cell`, so three badges
-  just fit on normal aspect ratios. On a much wider/shorter render the
-  AUTOPLAY badge can touch the CONTROLS header; nudge `my` or `cy` if that
-  ever shows up.
+  toggling autoplay off leaves easy/ghost as-is. EASY/GHOST/CHEAT badges always
+  show ON/OFF; AUTOPLAY shows only while active and PAUSED only while halted.
+- Layout: the EASY/GHOST/CHEAT badges stack from `oy + 5*cell` downward (each
+  `mfs + 8` tall), with AUTOPLAY and PAUSED (shown while active/halted,
+  amber) as fourth/fifth slots; CONTROLS starts at `oy + 9*cell` to clear
+  all five.
+
+## Caveats / don't re-break
+
+- CONTROLS is 13 rows and the badge stack is now up to 5 slots tall. At a
+  16:9-ish window everything fits with room to spare, but on a much
+  shorter/wider render the last control row can crowd the bottom edge. If
+  that shows up, shrink `mfs`/`cfs` or lower the badge count, not `cy`.
+- Both `H` (hint) and `Ctrl` (cheat mirror) silently no-op when the target
+  placement/mirror would collide at the piece's current position — that's
+  intended, not a missed input. Hint doesn't require easy mode to be on; it
+  just reuses `easyBestDrop`.
 
 ## Facts worth not re-deriving
 
