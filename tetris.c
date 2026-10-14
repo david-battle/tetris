@@ -275,29 +275,21 @@ int main(void) {
                                               : (Color){255,210,90,255};
                     DrawRectangleLinesEx(box, 3.0f, halo);
                 }
-                // Ghost drop profile: 1-pixel strip just below bottom frame
-                if (!gameOver && !paused) {
-                    int gy = drop_row(board, cur.s, cur.x, cur.y);
-                    int stripY = oy + ROWS * cell + 1; // just below bottom frame
-                    for (int x = 0; x < COLS; x++) {
-                        // check if any part of ghost covers this column at or below bottom?
-                        for (int y = 0; y < 4; y++) {
-                            if (!cur.s[y][x - cur.x >= 0 && (x - cur.x) < 4 ? (x - cur.x) : -1]) continue; // easier loop
-                        }
-                    }
-                    // simpler: for each cell in ghost, if gy+y >= ROWS draw a 1-px wide bar at stripY under that column
-                    for (int y = 0; y < 4; y++) {
-                        for (int x = 0; x < 4; x++) {
-                            if (!cur.s[y][x]) continue;
-                            int by = gy + y;
-                            if (by >= ROWS) {
-                                int cx = cur.x + x;
-                                if (cx >= 0 && cx < COLS) {
-                                    DrawRectangle(ox + cx*cell, stripY, cell-1, 2, (Color){255,255,255,160});
-                                }
+                // Ghost: translucent projection of where a hard drop would land.
+                // Drawn before the live piece so the piece sits on top when the
+                // two coincide (piece already grounded).
+                int gy = drop_row(board, cur.s, cur.x, cur.y);
+                if (gy != cur.y) {
+                    Color gc = COLORS[cur.type+1];
+                    gc.a = 80;
+                    Color go = COLORS[cur.type+1];
+                    go.a = 170;
+                    for (int y = 0; y < 4; y++)
+                        for (int x = 0; x < 4; x++)
+                            if (cur.s[y][x] && gy+y >= 0) {
+                                DrawRectangle(ox+(cur.x+x)*cell, oy+(gy+y)*cell, cell-1, cell-1, gc);
+                                DrawRectangleLines(ox+(cur.x+x)*cell, oy+(gy+y)*cell, cell-1, cell-1, go);
                             }
-                        }
-                    }
                 }
                 for (int y = 0; y < 4; y++)
                     for (int x = 0; x < 4; x++)
