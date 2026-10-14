@@ -235,6 +235,7 @@ int main(void) {
     int score = 0, lines = 0, level = 1, gameOver = 0, paused = 0;
     int easy = 0;
     int ghost = 1;
+    int autoPlay = 0;
     float timer = 0.0f, gravity = 0.8f;
     float dropRepeat = 0.0f;
 
@@ -258,8 +259,19 @@ int main(void) {
         if (bgm.frameCount > 0) UpdateMusicStream(bgm);
         #endif
 
-        if (IsKeyPressed(KEY_E)) easy = !easy;
+        // Autoplay: force easy mode on (so each spawn is preset to the best
+        // drop) and the ghost off, then keep hard-dropping at double the
+        // SPACE-hold rate. Toggling off leaves easy/ghost as they are; but
+        // turning easy mode off also takes autoplay down with it.
+        if (IsKeyPressed(KEY_E)) {
+            easy = !easy;
+            if (!easy) autoPlay = 0;
+        }
         if (IsKeyPressed(KEY_G)) ghost = !ghost;
+        if (IsKeyPressed(KEY_A)) {
+            autoPlay = !autoPlay;
+            if (autoPlay) { easy = 1; ghost = 0; }
+        }
 
         if (gameOver) {
             if (IsKeyPressed(KEY_ENTER)) {
@@ -307,11 +319,14 @@ int main(void) {
 
             // Hard drop. With easy mode on, holding SPACE keeps dropping the
             // piece that spawns after the lock, every 0.25s; otherwise a press
-            // drops only the current piece.
+            // drops only the current piece. Autoplay drops on its own at
+            // double that rate, with no key held.
             int doDrop = IsKeyPressed(KEY_SPACE);
-            if (easy && IsKeyDown(KEY_SPACE)) {
+            float repInt = easy && IsKeyDown(KEY_SPACE) ? 0.25f : 0.0f;
+            if (autoPlay) repInt = 0.125f;
+            if (repInt > 0.0f) {
                 dropRepeat += GetFrameTime();
-                if (dropRepeat >= 0.25f) { dropRepeat = 0.0f; doDrop = 1; }
+                if (dropRepeat >= repInt) { dropRepeat = 0.0f; doDrop = 1; }
             } else {
                 dropRepeat = 0.0f;
             }
@@ -433,7 +448,8 @@ int main(void) {
                 }
                 // Highlight rows that a hard drop in the current spot would
                 // clear: the landing rows painted translucent white so a
-                // pending line clear reads at a glance.
+                // pending line clear reads at a glance. Gated with the ghost.
+                if (ghost)
                 for (int r = gy; r < gy + 4; r++) {
                     if (r < 0 || r >= ROWS) continue;
                     int full = 1;
@@ -467,15 +483,35 @@ int main(void) {
             DrawText(TextFormat("LINES %d", lines), px, oy + boardH - fs*4, fs, RAYWHITE);
             DrawText(TextFormat("LEVEL %d", level), px, oy + boardH - fs*3, fs, RAYWHITE);
 
-            const char *modeTxt = easy ? "EASY: ON" : "EASY: OFF";
-            Color modeC = easy ? (Color){110,235,140,255} : (Color){150,150,170,255};
+            // Mode badges stacked under the NEXT preview: easy and ghost show
+            // ON/OFF like a switch; autoplay only appears while active.
             int mfs = fs * 2 / 3;
             if (mfs < 10) mfs = 10;
-            int mw = MeasureText(modeTxt, mfs);
             int my = oy + 5*cell;
-            DrawRectangle(px-4, my-4, mw+8, mfs+8, (Color){0,0,0,140});
-            DrawRectangleLinesEx((Rectangle){px-4, my-4, mw+8, mfs+8}, 1.0f, modeC);
-            DrawText(modeTxt, px, my, mfs, modeC);
+            const char *badgeTxt[2] = {
+                easy ? "EASY: ON" : "EASY: OFF",
+                ghost ? "GHOST: ON" : "GHOST: OFF"
+            };
+            Color badgeC[2] = {
+                easy ? (Color){110,235,140,255} : (Color){150,150,170,255},
+                ghost ? (Color){110,235,140,255} : (Color){150,150,170,255}
+            };
+            for (int i = 0; i < 2; i++) {
+                int bw = MeasureText(badgeTxt[i], mfs);
+                int by = my + i * (mfs + 8);
+                DrawRectangle(px-4, by-4, bw+8, mfs+8, (Color){0,0,0,140});
+                DrawRectangleLinesEx((Rectangle){px-4, by-4, bw+8, mfs+8}, 1.0f, badgeC[i]);
+                DrawText(badgeTxt[i], px, by, mfs, badgeC[i]);
+            }
+
+            if (autoPlay) {
+                Color ac = {110,190,255,255};
+                int ay = my + 2*(mfs + 8);
+                int aw = MeasureText("AUTOPLAY", mfs);
+                DrawRectangle(px-4, ay-4, aw+8, mfs+8, (Color){0,0,0,140});
+                DrawRectangleLinesEx((Rectangle){px-4, ay-4, aw+8, mfs+8}, 1.0f, ac);
+                DrawText("AUTOPLAY", px, ay, mfs, ac);
+            }
 
             int cy = oy + 7*cell;
             DrawText("CONTROLS", px, cy, fs, (Color){180,180,200,255});
@@ -487,18 +523,19 @@ int main(void) {
                 { "P / PAUSE",   "pause" },
                 { "E",           "easy mode" },
                 { "G",           "ghost" },
+                { "A",           "autoplay" },
                 { "ENTER",       "restart" },
                 { "ESC",         "quit" },
             };
             int cfs = fs * 2 / 3;
             if (cfs < 10) cfs = 10;
             int colX = 0;
-            for (int i = 0; i < 9; i++) {
+            for (int i = 0; i < 10; i++) {
                 int w = MeasureText(ctl[i][0], cfs);
                 if (w > colX) colX = w;
             }
             colX += px + cfs;
-            for (int i = 0; i < 9; i++) {
+            for (int i = 0; i < 10; i++) {
                 int ly = cy + fs + i * (cfs + cfs/3);
                 DrawText(ctl[i][0], px, ly, cfs, RAYWHITE);
                 DrawText(ctl[i][1], colX, ly, cfs, (Color){160,160,180,255});

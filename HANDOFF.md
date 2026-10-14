@@ -2,30 +2,35 @@
 
 State as of 2026-10-14. Working tree clean; latest commits:
 
-- `176075b` Look ahead to the next piece in easy mode best-drop search
-- `ce5369c` Add G key to toggle the hard-drop ghost piece
+- `21ab68a` Add handoff notes
 - `1929d5f` Auto-repeat hard drop while SPACE held in easy mode
+- `ce5369c` Add G key to toggle the hard-drop ghost piece
 
 Build/run: `make` (must stay warning-clean under `-Wall -Wextra`), `./run.sh`.
 
 ## What easy mode does now
 
-- Two-piece lookahead. `easyBestDrop()` (tetris.c ~158) scans every orientation
+- Two-piece lookahead. `easyBestDrop()` (tetris.c ~168) scans every orientation
   and column for the current piece, `tryPlace()`s each onto a scratch board, then
   `bestNext()` searches the preview piece (`nextType`) the same way from that
   result. A candidate is scored `400 * (clears by both pieces) + scoreBoard()`,
   minus a small `-|bx - (COLS/2 - 1)|` center bias (applied per piece).
-- `scoreBoard()` is the shape heuristic alone; `clearLines()` does the mutation.
+- `scoreBoard()` is the shape alone; `clearLines()` does the mutation.
   Weights: clear 400, tallest 12, total stack 5, buried holes 8 (depth-weighted),
   bumpiness 4.
 - `SPAWN()` passes `nextType` (already the re-rolled preview at that point).
 
 ## Other toggles/behaviour
 
-- `G` toggles the hard-drop ghost (`ghost`, starts on). Only the translucent
-  ghost cells are gated; the pending-line-clear row highlight is independent.
+- `G` toggles the hard-drop ghost (`ghost`, starts on): both the translucent
+  ghost cells and the pending-line-clear row highlight are gated by it.
 - Easy on: holding SPACE re-drops each newly spawned piece every 0.25s
-  (`dropRepeat`, tetris.c ~311). Easy off: one hard drop per press, unchanged.
+  (`dropRepeat`, tetris.c ~330). Easy off: one hard drop per press, unchanged.
+- `A` toggles autoplay (`autoPlay`): forces easy on + ghost off, then hard
+  drops the easy-best placement every 0.125s (double the SPACE-hold rate)
+  with no key held. Pressing `E` to turn easy off also clears autoplay;
+  toggling autoplay off leaves easy/ghost as-is. EASY/GHOST badges always
+  show ON/OFF; AUTOPLAY badge only shows while active.
 
 ## Facts worth not re-deriving
 
@@ -43,6 +48,6 @@ Build/run: `make` (must stay warning-clean under `-Wall -Wextra`), `./run.sh`.
 
 ## Possible next steps (none started)
 
-- Tune auto-repeat interval (single constant, currently 0.25s).
+- Tune auto-repeat intervals (0.25s hold, 0.125s autoplay).
 - Try different easy-mode weights, or look further ahead.
 - Optional RNG-seed change noted above.

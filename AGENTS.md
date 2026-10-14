@@ -26,7 +26,10 @@ repo. Keep changes small.
   hard-dropped straight down, then the next piece is searched the same way
   from that result, and the pair is scored on its final board (clears good,
   tall pile / bumpiness / deeply buried holes bad). `tryPlace()`/`clearLines()`
-  mutate the scratch boards they are given while simulating.
+  mutate the scratch boards they are given while simulating. Autoplay (`A`)
+  builds on easy mode: toggling it on forces easy on and the ghost off, then
+  hard-drops the easy-best placement every 0.125s; turning easy off (`E`)
+  clears autoplay too.
 - `resources/` — audio only: `buttonfx.wav` (move), `ping_send.wav` (rotate),
   `coin.wav` (lock), `hit_splat.wav` (line clear), `boom.wav` (game over), and
   `country.mp3` (looped BGM). Paths are relative, so run the binary from the
