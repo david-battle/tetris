@@ -2,3 +2,4 @@ tetris
 *.o
 tetris.log
 nohup.out
+tetris.patch
