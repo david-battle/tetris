@@ -68,41 +68,45 @@ static void rotate(int s[4][4], int n) {
             s[y][x] = t[y][x];
 }
 
+// Pick the external monitor. On WSLg the built-in laptop panel and the
+// external monitor are both named "rdp-N", so names alone can't tell them
+// apart, but physical size can: the laptop panel is the smaller one. Native
+// Linux built-ins (eDP/LVDS/...) are excluded by name.
 static int SelectExternalMonitor(void) {
     int count = GetMonitorCount();
     if (count <= 1) return 0;
-    // Prefer highest resolution non-builtin-like; also prefer rdp-2 over rdp-0 if present
-    int best = 0;
-    int bestArea = -1;
+
+    int best = -1;
+    long bestArea = -1;
     for (int i = 0; i < count; i++) {
         const char *name = GetMonitorName(i);
-        int area = GetMonitorWidth(i) * GetMonitorHeight(i);
-        int isBuiltin = 0;
-        if (name) {
-            if (strstr(name, "eDP") || strstr(name, "LVDS") || strstr(name, "Built") ||
-                strstr(name, "Laptop") || strstr(name, "LCD") || strstr(name, "Internal") ||
-                strcmp(name, "rdp-0") == 0) {
-                isBuiltin = 1;
-            }
+        if (name && (strstr(name, "eDP") || strstr(name, "LVDS") ||
+                     strstr(name, "DSI") || strstr(name, "Built") ||
+                     strstr(name, "Laptop") || strstr(name, "Internal"))) {
+            continue;
         }
-        if (!isBuiltin && area > bestArea) {
-            bestArea = area;
-            best = i;
-        }
+        int pw = GetMonitorPhysicalWidth(i);
+        int ph = GetMonitorPhysicalHeight(i);
+        long area = (pw > 0 && ph > 0) ? (long)pw * ph
+                                       : (long)GetMonitorWidth(i) * GetMonitorHeight(i);
+        if (area > bestArea) { bestArea = area; best = i; }
     }
-    if (bestArea < 0) {
-        // fallback: pick index 1 if exists
-        best = (count > 1) ? 1 : 0;
-    }
-    return best;
+    return (best < 0) ? 0 : best;
 }
 
 int main(void) {
+    // WSLg's RAIL shell ignores SetWindowMonitor()/FLAG_FULLSCREEN_MODE and
+    // pins fullscreen X11 windows to the main screen, so cover the chosen
+    // monitor with an undecorated window (borderless-windowed fullscreen)
+    // instead. Monitor geometry is only valid after InitWindow().
+    SetConfigFlags(FLAG_WINDOW_UNDECORATED | FLAG_VSYNC_HINT);
+    InitWindow(640, 480, "Tetris");
+
     int ext = SelectExternalMonitor();
-    SetConfigFlags(FLAG_FULLSCREEN_MODE | FLAG_VSYNC_HINT);
-    InitWindow(GetMonitorWidth(ext), GetMonitorHeight(ext), "Tetris");
-    SetWindowMonitor(ext);
-    SetWindowState(FLAG_FULLSCREEN_MODE);
+    Vector2 mp = GetMonitorPosition(ext);
+    SetWindowSize(GetMonitorWidth(ext), GetMonitorHeight(ext));
+    SetWindowPosition((int)mp.x, (int)mp.y);
+
     SetTargetFPS(60);
     InitAudioDevice();
 

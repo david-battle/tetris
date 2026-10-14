@@ -41,6 +41,15 @@ repo. Keep changes small.
   midpoint. A single shared 4x4 grid rotated about the midpoint drifts the piece
   across cells on every turn. The per-piece centered grid is drift-free across
   four rotations; don't collapse it back to one grid.
+- **Window placement on WSLg.** Do not go back to `FLAG_FULLSCREEN_MODE` +
+  `SetWindowMonitor()`. WSLg's RAIL shell ignores the requested monitor and
+  pins fullscreen X11 windows to the main screen, so the game always came up on
+  the built-in panel. Instead the window is undecorated and sized/positioned
+  over the chosen monitor (borderless-windowed fullscreen), which RAIL honors.
+  Monitor geometry is only valid after `InitWindow()`, so monitor selection runs
+  after it. `SelectExternalMonitor()` picks by physical panel size (the laptop
+  panel is the smaller one); on WSLg both monitors are named `rdp-N`, so names
+  can't distinguish them.
 - **Lock cue.** There is no separate lock-delay timer: a grounded piece stays
   live until the next gravity tick. The white-pulse fill and blinking
   white/amber halo are keyed off the same `collide(board, cur.s, cur.x,
