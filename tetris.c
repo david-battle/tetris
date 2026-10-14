@@ -302,6 +302,23 @@ int main(void) {
                                 DrawRectangleLines(ox+(cur.x+x)*cell, oy+(gy+y)*cell, cell-1, cell-1, go);
                             }
                 }
+                // Highlight rows that a hard drop in the current spot would
+                // clear: the landing rows painted translucent white so a
+                // pending line clear reads at a glance.
+                for (int r = gy; r < gy + 4; r++) {
+                    if (r < 0 || r >= ROWS) continue;
+                    int full = 1;
+                    for (int x = 0; x < COLS && full; x++) {
+                        int filled = board[r][x];
+                        for (int y = 0; y < 4 && !filled; y++) {
+                            int bx = x - cur.x;
+                            if (bx >= 0 && bx < 4 && cur.s[y][bx] && gy + y == r) filled = 1;
+                        }
+                        if (!filled) full = 0;
+                    }
+                    if (full)
+                        DrawRectangle(ox, oy + r*cell, boardW, cell-1, (Color){255,255,255,70});
+                }
                 for (int y = 0; y < 4; y++)
                     for (int x = 0; x < 4; x++)
                         if (cur.s[y][x] && cur.y+y >= 0) {
