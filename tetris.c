@@ -236,6 +236,7 @@ int main(void) {
     int easy = 0;
     int ghost = 1;
     float timer = 0.0f, gravity = 0.8f;
+    float dropRepeat = 0.0f;
 
     #define SPAWN() do { \
         memcpy(cur.s, SHAPES[nextType], sizeof(cur.s)); cur.type = nextType; \
@@ -303,7 +304,18 @@ int main(void) {
                     }
                 }
             }
-            if (IsKeyPressed(KEY_SPACE)) {
+
+            // Hard drop. With easy mode on, holding SPACE keeps dropping the
+            // piece that spawns after the lock, every 0.25s; otherwise a press
+            // drops only the current piece.
+            int doDrop = IsKeyPressed(KEY_SPACE);
+            if (easy && IsKeyDown(KEY_SPACE)) {
+                dropRepeat += GetFrameTime();
+                if (dropRepeat >= 0.25f) { dropRepeat = 0.0f; doDrop = 1; }
+            } else {
+                dropRepeat = 0.0f;
+            }
+            if (doDrop) {
                 while (!collide(board, cur.s, cur.x, cur.y+1)) { cur.y++; score += 2; }
                 timer = 999.0f;
             }
