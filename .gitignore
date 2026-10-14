@@ -1,0 +1,4 @@
+tetris
+*.o
+tetris.log
+nohup.out
