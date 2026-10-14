@@ -234,6 +234,7 @@ int main(void) {
     int nextType = 0;
     int score = 0, lines = 0, level = 1, gameOver = 0, paused = 0;
     int easy = 0;
+    int ghost = 1;
     float timer = 0.0f, gravity = 0.8f;
 
     #define SPAWN() do { \
@@ -257,6 +258,7 @@ int main(void) {
         #endif
 
         if (IsKeyPressed(KEY_E)) easy = !easy;
+        if (IsKeyPressed(KEY_G)) ghost = !ghost;
 
         if (gameOver) {
             if (IsKeyPressed(KEY_ENTER)) {
@@ -403,9 +405,9 @@ int main(void) {
                 }
                 // Ghost: translucent projection of where a hard drop would land.
                 // Drawn before the live piece so the piece sits on top when the
-                // two coincide (piece already grounded).
+                // two coincide (piece already grounded). Toggleable with G.
                 int gy = drop_row(board, cur.s, cur.x, cur.y);
-                if (gy != cur.y) {
+                if (ghost && gy != cur.y) {
                     Color gc = COLORS[cur.type+1];
                     gc.a = 80;
                     Color go = COLORS[cur.type+1];
@@ -472,18 +474,19 @@ int main(void) {
                 { "SPACE",       "hard drop" },
                 { "P / PAUSE",   "pause" },
                 { "E",           "easy mode" },
+                { "G",           "ghost" },
                 { "ENTER",       "restart" },
                 { "ESC",         "quit" },
             };
             int cfs = fs * 2 / 3;
             if (cfs < 10) cfs = 10;
             int colX = 0;
-            for (int i = 0; i < 8; i++) {
+            for (int i = 0; i < 9; i++) {
                 int w = MeasureText(ctl[i][0], cfs);
                 if (w > colX) colX = w;
             }
             colX += px + cfs;
-            for (int i = 0; i < 8; i++) {
+            for (int i = 0; i < 9; i++) {
                 int ly = cy + fs + i * (cfs + cfs/3);
                 DrawText(ctl[i][0], px, ly, cfs, RAYWHITE);
                 DrawText(ctl[i][1], colX, ly, cfs, (Color){160,160,180,255});
