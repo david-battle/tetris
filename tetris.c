@@ -68,12 +68,16 @@ static void rotate(int s[4][4], int n) {
             s[y][x] = t[y][x];
 }
 
-// Easy mode's local heuristic. Scores a scratch board (mutated) after applying
-// any line clears the drop would cause: rewards clears, punishes a high pile
-// (both the tallest column and total stack), rough column tops, and holes --
-// weighted by how far below the column surface they sit, so deeply buried
-// empty cells cost far more than surface ones.
-static int evalBoard(int b[ROWS][COLS]) {
+// Column bx keeps every occupied cell of s inside the well.
+static int colFits(int s[4][4], int bx) {
+    for (int y = 0; y < 4; y++)
+        for (int x = 0; x < 4; x++)
+            if (s[y][x] && (bx + x < 0 || bx + x >= COLS)) return 0;
+    return 1;
+}
+
+// Remove every full row, shifting the stack down; returns how many went.
+static int clearLines(int b[ROWS][COLS]) {
     int cleared = 0;
     for (int y = ROWS-1; y >= 0; y--) {
         int full = 1;
@@ -86,7 +90,14 @@ static int evalBoard(int b[ROWS][COLS]) {
             y++;
         }
     }
+    return cleared;
+}
 
+// Easy mode's shape heuristic, for a board whose lines are already cleared:
+// punishes a high pile (both the tallest column and total stack), rough column
+// tops, and holes -- weighted by how far below the column surface they sit, so
+// deeply buried empty cells cost far more than surface ones.
+static int scoreBoard(int b[ROWS][COLS]) {
     int h[COLS], sum = 0, top = 0, buried = 0, bump = 0;
     for (int x = 0; x < COLS; x++) {
         int t = 0;
@@ -102,33 +113,59 @@ static int evalBoard(int b[ROWS][COLS]) {
         if (d < 0) d = -d;
         bump += d;
     }
-    return cleared*400 - top*12 - sum*5 - buried*8 - bump*4;
+    return -top*12 - sum*5 - buried*8 - bump*4;
 }
 
-// Easy mode: scan every orientation and column the piece could spawn in,
-// assume the player hard-drops it straight down from there, and preset the
-// current piece to the highest-scoring one. Ties and near-ties lean toward
+// Hard-drop `type` in orientation s at column bx onto a copy of b, lock it in,
+// and clear whatever lines that fills. Returns the number of lines cleared;
+// the resulting (already-cleared) board is written to out.
+static int tryPlace(int b[ROWS][COLS], int s[4][4], int bx, int type, int out[ROWS][COLS]) {
+    int fy = drop_row(b, s, bx, 0);
+    memcpy(out, b, sizeof(int) * ROWS * COLS);
+    for (int y = 0; y < 4; y++)
+        for (int x = 0; x < 4; x++)
+            if (s[y][x]) out[fy+y][bx+x] = type + 1;
+    return clearLines(out);
+}
+
+// Best score the piece `type` can produce from board b, given that `prior`
+// lines were already cleared by the piece before it: search every orientation
+// and column, hard-drop straight down, and score each final position as its
+// own clears plus the earlier ones, over the shape heuristic. Ties lean toward
 // the middle of the well.
-static void easyBestDrop(int b[ROWS][COLS], Piece *p) {
+static int bestNext(int b[ROWS][COLS], int type, int prior) {
+    int bestSc = 0, have = 0;
+    int s[4][4], nb[ROWS][COLS];
+    memcpy(s, SHAPES[type], sizeof(s));
+    for (int rot = 0; rot < 4; rot++) {
+        for (int bx = -4; bx < COLS + 4; bx++) {
+            if (!colFits(s, bx) || collide(b, s, bx, 0)) continue;
+            int c = tryPlace(b, s, bx, type, nb);
+            int sc = (prior + c) * 400 + scoreBoard(nb) - abs(bx - (COLS/2 - 1));
+            if (!have || sc > bestSc) { have = 1; bestSc = sc; }
+        }
+        rotate(s, SIZES[type]);
+    }
+    if (!have) bestSc = prior * 400 + scoreBoard(b);
+    return bestSc;
+}
+
+// Easy mode: scan every orientation and column the current piece could spawn
+// in, assume the player hard-drops it straight down from there, then search
+// the next piece's placements the same way from that result, and preset the
+// current piece to the placement whose two-piece outcome scores best. Ties and
+// near-ties lean toward the middle of the well.
+static void easyBestDrop(int b[ROWS][COLS], Piece *p, int nextType) {
     int bestSc = 0, bestX = p->x, have = 0;
     int bestS[4][4], s[4][4];
     memcpy(s, p->s, sizeof(s));
     for (int rot = 0; rot < 4; rot++) {
         for (int bx = -4; bx < COLS + 4; bx++) {
-            int ok = 1;
-            for (int y = 0; y < 4 && ok; y++)
-                for (int x = 0; x < 4; x++)
-                    if (s[y][x] && (bx + x < 0 || bx + x >= COLS)) { ok = 0; break; }
-            if (!ok || collide(b, s, bx, 0)) continue;
+            if (!colFits(s, bx) || collide(b, s, bx, 0)) continue;
 
-            int fy = drop_row(b, s, bx, 0);
             int nb[ROWS][COLS];
-            memcpy(nb, b, sizeof(nb));
-            for (int y = 0; y < 4; y++)
-                for (int x = 0; x < 4; x++)
-                    if (s[y][x]) nb[fy+y][bx+x] = p->type + 1;
-
-            int sc = evalBoard(nb) - abs(bx - (COLS/2 - 1));
+            int c1 = tryPlace(b, s, bx, p->type, nb);
+            int sc = bestNext(nb, nextType, c1) - abs(bx - (COLS/2 - 1));
             if (!have || sc > bestSc) {
                 have = 1; bestSc = sc; bestX = bx;
                 memcpy(bestS, s, sizeof(bestS));
@@ -204,7 +241,7 @@ int main(void) {
         cur.x = 3; cur.y = 0; \
         nextType = GetRandomValue(0, 6); \
         if (collide(board, cur.s, cur.x, cur.y)) gameOver = 1; \
-        else if (easy) easyBestDrop(board, &cur); \
+        else if (easy) easyBestDrop(board, &cur, nextType); \
     } while (0)
 
     nextType = GetRandomValue(0, 6);
