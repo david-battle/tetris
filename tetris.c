@@ -68,6 +68,80 @@ static void rotate(int s[4][4], int n) {
             s[y][x] = t[y][x];
 }
 
+// Easy mode's local heuristic. Scores a scratch board (mutated) after applying
+// any line clears the drop would cause: rewards clears, punishes a high pile
+// (both the tallest column and total stack), rough column tops, and holes --
+// weighted by how far below the column surface they sit, so deeply buried
+// empty cells cost far more than surface ones.
+static int evalBoard(int b[ROWS][COLS]) {
+    int cleared = 0;
+    for (int y = ROWS-1; y >= 0; y--) {
+        int full = 1;
+        for (int x = 0; x < COLS; x++) if (!b[y][x]) { full = 0; break; }
+        if (full) {
+            cleared++;
+            for (int yy = y; yy > 0; yy--)
+                memcpy(b[yy], b[yy-1], sizeof(b[0]));
+            memset(b[0], 0, sizeof(b[0]));
+            y++;
+        }
+    }
+
+    int h[COLS], sum = 0, top = 0, buried = 0, bump = 0;
+    for (int x = 0; x < COLS; x++) {
+        int t = 0;
+        while (t < ROWS && !b[t][x]) t++;
+        h[x] = ROWS - t;
+        sum += h[x];
+        if (h[x] > top) top = h[x];
+        for (int y = t; y < ROWS; y++)
+            if (!b[y][x]) buried += y - t + 1;
+    }
+    for (int x = 1; x < COLS; x++) {
+        int d = h[x] - h[x-1];
+        if (d < 0) d = -d;
+        bump += d;
+    }
+    return cleared*400 - top*12 - sum*5 - buried*8 - bump*4;
+}
+
+// Easy mode: scan every orientation and column the piece could spawn in,
+// assume the player hard-drops it straight down from there, and preset the
+// current piece to the highest-scoring one. Ties and near-ties lean toward
+// the middle of the well.
+static void easyBestDrop(int b[ROWS][COLS], Piece *p) {
+    int bestSc = 0, bestX = p->x, have = 0;
+    int bestS[4][4], s[4][4];
+    memcpy(s, p->s, sizeof(s));
+    for (int rot = 0; rot < 4; rot++) {
+        for (int bx = -4; bx < COLS + 4; bx++) {
+            int ok = 1;
+            for (int y = 0; y < 4 && ok; y++)
+                for (int x = 0; x < 4; x++)
+                    if (s[y][x] && (bx + x < 0 || bx + x >= COLS)) { ok = 0; break; }
+            if (!ok || collide(b, s, bx, 0)) continue;
+
+            int fy = drop_row(b, s, bx, 0);
+            int nb[ROWS][COLS];
+            memcpy(nb, b, sizeof(nb));
+            for (int y = 0; y < 4; y++)
+                for (int x = 0; x < 4; x++)
+                    if (s[y][x]) nb[fy+y][bx+x] = p->type + 1;
+
+            int sc = evalBoard(nb) - abs(bx - (COLS/2 - 1));
+            if (!have || sc > bestSc) {
+                have = 1; bestSc = sc; bestX = bx;
+                memcpy(bestS, s, sizeof(bestS));
+            }
+        }
+        rotate(s, SIZES[p->type]);
+    }
+    if (have) {
+        memcpy(p->s, bestS, sizeof(p->s));
+        p->x = bestX;
+    }
+}
+
 // Pick the external monitor. On WSLg the built-in laptop panel and the
 // external monitor are both named "rdp-N", so names alone can't tell them
 // apart, but physical size can: the laptop panel is the smaller one. Native
@@ -122,6 +196,7 @@ int main(void) {
     Piece cur = {0};
     int nextType = 0;
     int score = 0, lines = 0, level = 1, gameOver = 0, paused = 0;
+    int easy = 0;
     float timer = 0.0f, gravity = 0.8f;
 
     #define SPAWN() do { \
@@ -129,6 +204,7 @@ int main(void) {
         cur.x = 3; cur.y = 0; \
         nextType = GetRandomValue(0, 6); \
         if (collide(board, cur.s, cur.x, cur.y)) gameOver = 1; \
+        else if (easy) easyBestDrop(board, &cur); \
     } while (0)
 
     nextType = GetRandomValue(0, 6);
@@ -142,6 +218,8 @@ int main(void) {
         #if defined(PLATFORM_DESKTOP)
         if (bgm.frameCount > 0) UpdateMusicStream(bgm);
         #endif
+
+        if (IsKeyPressed(KEY_E)) easy = !easy;
 
         if (gameOver) {
             if (IsKeyPressed(KEY_ENTER)) {
@@ -338,6 +416,16 @@ int main(void) {
             DrawText(TextFormat("LINES %d", lines), px, oy + boardH - fs*4, fs, RAYWHITE);
             DrawText(TextFormat("LEVEL %d", level), px, oy + boardH - fs*3, fs, RAYWHITE);
 
+            const char *modeTxt = easy ? "EASY: ON" : "EASY: OFF";
+            Color modeC = easy ? (Color){110,235,140,255} : (Color){150,150,170,255};
+            int mfs = fs * 2 / 3;
+            if (mfs < 10) mfs = 10;
+            int mw = MeasureText(modeTxt, mfs);
+            int my = oy + 5*cell;
+            DrawRectangle(px-4, my-4, mw+8, mfs+8, (Color){0,0,0,140});
+            DrawRectangleLinesEx((Rectangle){px-4, my-4, mw+8, mfs+8}, 1.0f, modeC);
+            DrawText(modeTxt, px, my, mfs, modeC);
+
             int cy = oy + 7*cell;
             DrawText("CONTROLS", px, cy, fs, (Color){180,180,200,255});
             static const char *ctl[][2] = {
@@ -346,18 +434,19 @@ int main(void) {
                 { "UP",          "rotate" },
                 { "SPACE",       "hard drop" },
                 { "P / PAUSE",   "pause" },
+                { "E",           "easy mode" },
                 { "ENTER",       "restart" },
                 { "ESC",         "quit" },
             };
             int cfs = fs * 2 / 3;
             if (cfs < 10) cfs = 10;
             int colX = 0;
-            for (int i = 0; i < 7; i++) {
+            for (int i = 0; i < 8; i++) {
                 int w = MeasureText(ctl[i][0], cfs);
                 if (w > colX) colX = w;
             }
             colX += px + cfs;
-            for (int i = 0; i < 7; i++) {
+            for (int i = 0; i < 8; i++) {
                 int ly = cy + fs + i * (cfs + cfs/3);
                 DrawText(ctl[i][0], px, ly, cfs, RAYWHITE);
                 DrawText(ctl[i][1], colX, ly, cfs, (Color){160,160,180,255});

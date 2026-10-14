@@ -21,6 +21,10 @@ repo. Keep changes small.
   rotate/hard-drop, line clears, scoring, levels with rising gravity,
   next-piece preview, game over + ENTER restart, on-screen controls panel, and
   external-monitor fullscreen with cell size scaled to the render resolution.
+  Toggleable easy mode (`E`, shown on screen): each new spawn is preset to the
+  orientation/column with the best `evalBoard()` score for a straight-down
+  drop (clears good, tall pile / bumpiness / deeply buried holes bad).
+  `evalBoard()` mutates the scratch board it is given while simulating clears.
 - `resources/` — audio only: `buttonfx.wav` (move), `ping_send.wav` (rotate),
   `coin.wav` (lock), `hit_splat.wav` (line clear), `boom.wav` (game over), and
   `country.mp3` (looped BGM). Paths are relative, so run the binary from the
