@@ -169,11 +169,22 @@ int main(void) {
             if (IsKeyPressed(KEY_UP)) {
                 int tmp[4][4]; memcpy(tmp, cur.s, sizeof(tmp));
                 rotate(tmp, SIZES[cur.type]);
-                for (int kick = 0; kick >= -2; kick--)
-                    if (!collide(board, tmp, cur.x+kick, cur.y)) {
-                        memcpy(cur.s, tmp, sizeof(tmp)); cur.x += kick;
+                // DWIM kick: try the plain rotation first, then one square in
+                // each direction from the current spot, preferring lateral and
+                // upward shifts over dropping. Keeps rotates from failing when
+                // a wall or the stack clips one corner.
+                static const int kicks[][2] = {
+                    {0,0}, {-1,0}, {1,0}, {0,-1}, {-1,-1}, {1,-1},
+                    {0,1}, {-1,1}, {1,1}
+                };
+                for (int i = 0; i < 9; i++) {
+                    int nx = cur.x + kicks[i][0], ny = cur.y + kicks[i][1];
+                    if (!collide(board, tmp, nx, ny)) {
+                        memcpy(cur.s, tmp, sizeof(tmp));
+                        cur.x = nx; cur.y = ny;
                         PlaySound(sRot); break;
                     }
+                }
             }
             if (IsKeyPressed(KEY_SPACE)) {
                 while (!collide(board, cur.s, cur.x, cur.y+1)) { cur.y++; score += 2; }
