@@ -524,9 +524,9 @@ int main(void) {
                     if (SHAPES[nextType][y][x])
                         DrawRectangle(px + x*cell, oy + fs + cell + y*cell, cell-1, cell-1, COLORS[nextType+1]);
 
-            DrawText(TextFormat("SCORE %d", score), px, oy + boardH - fs*5, fs, RAYWHITE);
-            DrawText(TextFormat("LINES %d", lines), px, oy + boardH - fs*4, fs, RAYWHITE);
-            DrawText(TextFormat("LEVEL %d", level), px, oy + boardH - fs*3, fs, RAYWHITE);
+            DrawText(TextFormat("SCORE %d", score), cell, cell, fs, RAYWHITE);
+            DrawText(TextFormat("LINES %d", lines), cell, cell + fs*2, fs, RAYWHITE);
+            DrawText(TextFormat("LEVEL %d", level), cell, cell + fs*4, fs, RAYWHITE);
 
             // Mode badges stacked under the NEXT preview: easy, ghost and
             // cheat show ON/OFF like a switch; autoplay and paused only appear
