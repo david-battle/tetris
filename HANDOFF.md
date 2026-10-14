@@ -31,6 +31,11 @@ Build/run: `make` (must stay warning-clean under `-Wall -Wextra`), `./run.sh`.
   with no key held. Pressing `E` to turn easy off also clears autoplay;
   toggling autoplay off leaves easy/ghost as-is. EASY/GHOST badges always
   show ON/OFF; AUTOPLAY badge only shows while active.
+- Layout caveat: the badges stack from `oy + 5*cell` downward (each
+  `mfs + 8` tall) while CONTROLS starts at `oy + 7*cell`, so three badges
+  just fit on normal aspect ratios. On a much wider/shorter render the
+  AUTOPLAY badge can touch the CONTROLS header; nudge `my` or `cy` if that
+  ever shows up.
 
 ## Facts worth not re-deriving
 
