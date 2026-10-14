@@ -2,9 +2,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <time.h>
 
 #define COLS 10
 #define ROWS 20
+#define SPAWN_X 3             // column where every new piece appears
+// Score knocked off a position in which the next piece cannot spawn.
+// Dwarfs every other term in the heuristics (a full-width clear is +400).
+#define TOPOUT_PENALTY 100000
 
 // Each piece lives in its own square grid (size in SIZES) centered on the grid
 // midpoint, so a 90-degree rotation about that midpoint leaves the piece where
@@ -32,9 +37,20 @@ static const Color COLORS[8] = {
     {255,0,0,255},      // Z red
 };
 
-static int board[ROWS][COLS];
-
 typedef struct { int s[4][4]; int x, y; int type; } Piece;
+
+// Everything that changes while playing. Passing this around instead of
+// capturing locals in a macro lets spawn() live outside main() and lets the
+// placement search run against any board, not just the global one.
+typedef struct {
+    int board[ROWS][COLS];
+    Piece cur;
+    int nextType;
+    int score, lines, level;
+    int gameOver, paused;
+    int easy, ghost, autoPlay, cheat;
+    float timer, gravity, dropRepeat;
+} Game;
 
 static int collide(int b[ROWS][COLS], int s[4][4], int px, int py) {
     for (int y = 0; y < 4; y++)
@@ -153,6 +169,10 @@ static int bestNext(int b[ROWS][COLS], int type, int prior) {
     int bestSc = 0, have = 0;
     int s[4][4], nb[ROWS][COLS];
     memcpy(s, SHAPES[type], sizeof(s));
+    // The real game ends when the new piece collides where it spawns, even
+    // if some other column would have had room, so test exactly that.
+    if (collide(b, s, SPAWN_X, 0))
+        return prior * 400 + scoreBoard(b) - TOPOUT_PENALTY;
     for (int rot = 0; rot < 4; rot++) {
         for (int bx = -4; bx < COLS + 4; bx++) {
             if (!colFits(s, bx) || collide(b, s, bx, 0)) continue;
@@ -162,7 +182,7 @@ static int bestNext(int b[ROWS][COLS], int type, int prior) {
         }
         rotate(s, SIZES[type]);
     }
-    if (!have) bestSc = prior * 400 + scoreBoard(b);
+    if (!have) bestSc = prior * 400 + scoreBoard(b) - TOPOUT_PENALTY;
     return bestSc;
 }
 
@@ -193,6 +213,34 @@ static void easyBestDrop(int b[ROWS][COLS], Piece *p, int nextType) {
         memcpy(p->s, bestS, sizeof(p->s));
         p->x = bestX;
     }
+}
+
+// Bounding box (inclusive cell coordinates) of the occupied cells of s.
+static void shapeBounds(int s[4][4], int *x0, int *y0, int *x1, int *y1) {
+    *x0 = *y0 = 4;
+    *x1 = *y1 = -1;
+    for (int y = 0; y < 4; y++)
+        for (int x = 0; x < 4; x++)
+            if (s[y][x]) {
+                if (x < *x0) *x0 = x;
+                if (x > *x1) *x1 = x;
+                if (y < *y0) *y0 = y;
+                if (y > *y1) *y1 = y;
+            }
+}
+
+// Promote the next piece to the live one, draw a new next piece, and end the
+// game if the newcomer overlaps the stack. In easy mode the new piece is
+// also preset to the best placement.
+static void spawn(Game *g) {
+    Piece *p = &g->cur;
+    memcpy(p->s, SHAPES[g->nextType], sizeof(p->s));
+    p->type = g->nextType;
+    p->x = SPAWN_X;
+    p->y = 0;
+    g->nextType = GetRandomValue(0, 6);
+    if (collide(g->board, p->s, p->x, p->y)) g->gameOver = 1;
+    else if (g->easy) easyBestDrop(g->board, p, g->nextType);
 }
 
 // Pick the external monitor. On WSLg the built-in laptop panel and the
@@ -246,26 +294,14 @@ int main(void) {
     Music bgm = LoadMusicStream("resources/country.mp3");
     #endif
 
-    Piece cur = {0};
-    int nextType = 0;
-    int score = 0, lines = 0, level = 1, gameOver = 0, paused = 0;
-    int easy = 0;
-    int ghost = 1;
-    int autoPlay = 0;
-    int cheat = 0;
-    float timer = 0.0f, gravity = 0.8f;
-    float dropRepeat = 0.0f;
+    Game g = {0};
+    g.level = 1;
+    g.ghost = 1;
+    g.gravity = 0.8f;
 
-    #define SPAWN() do { \
-        memcpy(cur.s, SHAPES[nextType], sizeof(cur.s)); cur.type = nextType; \
-        cur.x = 3; cur.y = 0; \
-        nextType = GetRandomValue(0, 6); \
-        if (collide(board, cur.s, cur.x, cur.y)) gameOver = 1; \
-        else if (easy) easyBestDrop(board, &cur, nextType); \
-    } while (0)
-
-    nextType = GetRandomValue(0, 6);
-    SPAWN();
+    SetRandomSeed((unsigned int)time(NULL));   // before the first GetRandomValue
+    g.nextType = GetRandomValue(0, 6);
+    spawn(&g);
 
     #if defined(PLATFORM_DESKTOP)
     if (bgm.frameCount > 0) PlayMusicStream(bgm);
@@ -281,42 +317,38 @@ int main(void) {
         // SPACE-hold rate. Toggling off leaves easy/ghost as they are; but
         // turning easy mode off also takes autoplay down with it.
         if (IsKeyPressed(KEY_E)) {
-            easy = !easy;
-            if (!easy) autoPlay = 0;
+            g.easy = !g.easy;
+            if (!g.easy) g.autoPlay = 0;
         }
-        if (IsKeyPressed(KEY_G)) ghost = !ghost;
-        if (IsKeyPressed(KEY_C)) cheat = !cheat;
+        if (IsKeyPressed(KEY_G)) g.ghost = !g.ghost;
+        if (IsKeyPressed(KEY_C)) g.cheat = !g.cheat;
         if (IsKeyPressed(KEY_A)) {
-            autoPlay = !autoPlay;
-            if (autoPlay) { easy = 1; ghost = 0; }
+            g.autoPlay = !g.autoPlay;
+            if (g.autoPlay) { g.easy = 1; g.ghost = 0; }
         }
 
-        if (gameOver) {
+        if (g.gameOver) {
             if (IsKeyPressed(KEY_ENTER)) {
-                memset(board, 0, sizeof(board));
-                score = lines = 0; level = 1; gameOver = 0;
-                gravity = 0.8f;
-                paused = 0;
-                SPAWN();
+                memset(g.board, 0, sizeof(g.board));
+                g.score = g.lines = 0; g.level = 1; g.gameOver = 0;
+                g.gravity = 0.8f;
+                g.paused = 0;
+                spawn(&g);
             }
         } else if (IsKeyPressed(KEY_P) || IsKeyPressed(KEY_PAUSE)) {
-            paused = !paused;
+            g.paused = !g.paused;
             #if defined(PLATFORM_DESKTOP)
-            if (paused && bgm.frameCount > 0) PauseMusicStream(bgm);
-            else if (!paused && bgm.frameCount > 0) ResumeMusicStream(bgm);
+            if (g.paused && bgm.frameCount > 0) PauseMusicStream(bgm);
+            else if (!g.paused && bgm.frameCount > 0) ResumeMusicStream(bgm);
             #endif
-        } else if (paused) {
-            #if defined(PLATFORM_DESKTOP)
-            if (bgm.frameCount > 0) UpdateMusicStream(bgm);
-            #endif
-        } else {
-            if (IsKeyPressed(KEY_LEFT)  && !collide(board, cur.s, cur.x-1, cur.y)) { cur.x--; PlaySound(sMove); }
-            if (IsKeyPressed(KEY_RIGHT) && !collide(board, cur.s, cur.x+1, cur.y)) { cur.x++; PlaySound(sMove); }
-            if (IsKeyPressed(KEY_DOWN)  && !collide(board, cur.s, cur.x, cur.y+1)) { cur.y++; score += 1; }
+        } else if (!g.paused) {
+            if (IsKeyPressed(KEY_LEFT)  && !collide(g.board, g.cur.s, g.cur.x-1, g.cur.y)) { g.cur.x--; PlaySound(sMove); }
+            if (IsKeyPressed(KEY_RIGHT) && !collide(g.board, g.cur.s, g.cur.x+1, g.cur.y)) { g.cur.x++; PlaySound(sMove); }
+            if (IsKeyPressed(KEY_DOWN)  && !collide(g.board, g.cur.s, g.cur.x, g.cur.y+1)) { g.cur.y++; g.score += 1; }
 
             if (IsKeyPressed(KEY_UP)) {
-                int tmp[4][4]; memcpy(tmp, cur.s, sizeof(tmp));
-                rotate(tmp, SIZES[cur.type]);
+                int tmp[4][4]; memcpy(tmp, g.cur.s, sizeof(tmp));
+                rotate(tmp, SIZES[g.cur.type]);
                 // DWIM kick: try the plain rotation first, then one square in
                 // each direction from the current spot, preferring lateral and
                 // upward shifts over dropping. Keeps rotates from failing when
@@ -326,10 +358,10 @@ int main(void) {
                     {0,1}, {-1,1}, {1,1}
                 };
                 for (int i = 0; i < 9; i++) {
-                    int nx = cur.x + kicks[i][0], ny = cur.y + kicks[i][1];
-                    if (!collide(board, tmp, nx, ny)) {
-                        memcpy(cur.s, tmp, sizeof(tmp));
-                        cur.x = nx; cur.y = ny;
+                    int nx = g.cur.x + kicks[i][0], ny = g.cur.y + kicks[i][1];
+                    if (!collide(g.board, tmp, nx, ny)) {
+                        memcpy(g.cur.s, tmp, sizeof(tmp));
+                        g.cur.x = nx; g.cur.y = ny;
                         PlaySound(sRot); break;
                     }
                 }
@@ -340,10 +372,10 @@ int main(void) {
             // placement would overlap the stack at the current height, which
             // can happen when the piece has already fallen partway.
             if (IsKeyPressed(KEY_H)) {
-                Piece best = cur;
-                easyBestDrop(board, &best, nextType);
-                if (!collide(board, best.s, best.x, cur.y)) {
-                    cur = best;
+                Piece best = g.cur;
+                easyBestDrop(g.board, &best, g.nextType);
+                if (!collide(g.board, best.s, best.x, g.cur.y)) {
+                    g.cur = best;
                     PlaySound(sRot);
                 }
             }
@@ -352,12 +384,12 @@ int main(void) {
             // into its mirror partner in place (J<->L, S<->Z, color follows; T
             // spins 180, I/O unchanged). Skipped if the mirrored shape
             // wouldn't fit where the piece currently is.
-            if (cheat && (IsKeyPressed(KEY_LEFT_CONTROL) || IsKeyPressed(KEY_RIGHT_CONTROL))) {
+            if (g.cheat && (IsKeyPressed(KEY_LEFT_CONTROL) || IsKeyPressed(KEY_RIGHT_CONTROL))) {
                 int t[4][4];
-                int nt = mirrorShape(cur.type, cur.s, t);
-                if (!collide(board, t, cur.x, cur.y)) {
-                    memcpy(cur.s, t, sizeof(t));
-                    cur.type = nt;
+                int nt = mirrorShape(g.cur.type, g.cur.s, t);
+                if (!collide(g.board, t, g.cur.x, g.cur.y)) {
+                    memcpy(g.cur.s, t, sizeof(t));
+                    g.cur.type = nt;
                     PlaySound(sRot);
                 }
             }
@@ -367,56 +399,52 @@ int main(void) {
             // drops only the current piece. Autoplay drops on its own at
             // double that rate, with no key held.
             int doDrop = IsKeyPressed(KEY_SPACE);
-            float repInt = easy && IsKeyDown(KEY_SPACE) ? 0.25f : 0.0f;
-            if (autoPlay) repInt = 0.125f;
+            float repInt = g.easy && IsKeyDown(KEY_SPACE) ? 0.25f : 0.0f;
+            if (g.autoPlay) repInt = 0.125f;
             if (repInt > 0.0f) {
-                dropRepeat += GetFrameTime();
-                if (dropRepeat >= repInt) { dropRepeat = 0.0f; doDrop = 1; }
+                g.dropRepeat += GetFrameTime();
+                if (g.dropRepeat >= repInt) { g.dropRepeat = 0.0f; doDrop = 1; }
             } else {
-                dropRepeat = 0.0f;
+                g.dropRepeat = 0.0f;
             }
             if (doDrop) {
-                while (!collide(board, cur.s, cur.x, cur.y+1)) { cur.y++; score += 2; }
-                timer = 999.0f;
+                while (!collide(g.board, g.cur.s, g.cur.x, g.cur.y+1)) { g.cur.y++; g.score += 2; }
+                g.timer = 999.0f;
             }
 
-            float interval = 1.0f / gravity;
-            timer += GetFrameTime();
-            if (timer >= interval) {
-                timer = 0.0f;
-                if (!collide(board, cur.s, cur.x, cur.y+1)) {
-                    cur.y++;
+            float interval = 1.0f / g.gravity;
+            g.timer += GetFrameTime();
+            if (g.timer >= interval) {
+                g.timer = 0.0f;
+                if (!collide(g.board, g.cur.s, g.cur.x, g.cur.y+1)) {
+                    g.cur.y++;
                 } else {
+                    // A cell that would lock above the top row has nowhere to
+                    // go (an up-kick near top-out can do this): that is a
+                    // lock-out, not something to drop silently.
+                    int lockedOut = 0;
                     for (int y = 0; y < 4; y++)
                         for (int x = 0; x < 4; x++)
-                            if (cur.s[y][x] && cur.y+y >= 0)
-                                board[cur.y+y][cur.x+x] = cur.type + 1;
+                            if (g.cur.s[y][x]) {
+                                if (g.cur.y+y < 0) lockedOut = 1;
+                                else g.board[g.cur.y+y][g.cur.x+x] = g.cur.type + 1;
+                            }
 
-                    int cleared = 0;
-                    for (int y = ROWS-1; y >= 0; y--) {
-                        int full = 1;
-                        for (int x = 0; x < COLS; x++) if (!board[y][x]) { full = 0; break; }
-                        if (full) {
-                            cleared++;
-                            for (int yy = y; yy > 0; yy--)
-                                memcpy(board[yy], board[yy-1], sizeof(board[0]));
-                            memset(board[0], 0, sizeof(board[0]));
-                            y++;
-                        }
-                    }
+                    int cleared = clearLines(g.board);
                     if (cleared) {
                         int pts[5] = {0, 100, 300, 500, 800};
-                        score += pts[cleared] * level;
-                        lines += cleared;
-                        level = 1 + lines / 10;
-                        gravity = 0.8f + (level-1) * 0.25f;
-                        timer = 0.0f;
+                        g.score += pts[cleared] * g.level;
+                        g.lines += cleared;
+                        g.level = 1 + g.lines / 10;
+                        g.gravity = 0.8f + (g.level-1) * 0.25f;
+                        g.timer = 0.0f;
                         PlaySound(sClear);
                     } else {
                         PlaySound(sLand);
                     }
-                    SPAWN();
-                    if (gameOver) PlaySound(sOver);
+                    if (lockedOut) g.gameOver = 1;
+                    else spawn(&g);
+                    if (g.gameOver) PlaySound(sOver);
                 }
             }
         }
@@ -439,14 +467,14 @@ int main(void) {
 
             for (int y = 0; y < ROWS; y++)
                 for (int x = 0; x < COLS; x++) {
-                    if (!board[y][x]) continue;
-                    DrawRectangle(ox+x*cell, oy+y*cell, cell-1, cell-1, COLORS[board[y][x]]);
+                    if (!g.board[y][x]) continue;
+                    DrawRectangle(ox+x*cell, oy+y*cell, cell-1, cell-1, COLORS[g.board[y][x]]);
                     DrawRectangleLines(ox+x*cell, oy+y*cell, cell-1, cell-1, (Color){0,0,0,120});
                 }
 
-            if (!gameOver) {
-                int grounded = collide(board, cur.s, cur.x, cur.y+1);
-                Color pc = COLORS[cur.type+1];
+            if (!g.gameOver) {
+                int grounded = collide(g.board, g.cur.s, g.cur.x, g.cur.y+1);
+                Color pc = COLORS[g.cur.type+1];
                 float pulse = 0.0f;
                 if (grounded) {
                     // Resting on the stack but not locked yet (heavy gravity
@@ -458,17 +486,10 @@ int main(void) {
                     pc.g = (unsigned char)(pc.g + (255 - pc.g) * mix);
                     pc.b = (unsigned char)(pc.b + (255 - pc.b) * mix);
 
-                    int minx = 4, miny = 4, maxx = -1, maxy = -1;
-                    for (int y = 0; y < 4; y++)
-                        for (int x = 0; x < 4; x++)
-                            if (cur.s[y][x]) {
-                                if (x < minx) minx = x;
-                                if (x > maxx) maxx = x;
-                                if (y < miny) miny = y;
-                                if (y > maxy) maxy = y;
-                            }
+                    int minx, miny, maxx, maxy;
+                    shapeBounds(g.cur.s, &minx, &miny, &maxx, &maxy);
                     Rectangle box = {
-                        ox + (cur.x+minx)*cell, oy + (cur.y+miny)*cell,
+                        ox + (g.cur.x+minx)*cell, oy + (g.cur.y+miny)*cell,
                         (maxx-minx+1)*cell, (maxy-miny+1)*cell
                     };
                     Color halo = pulse > 0.5f ? (Color){255,255,255,255}
@@ -478,31 +499,31 @@ int main(void) {
                 // Ghost: translucent projection of where a hard drop would land.
                 // Drawn before the live piece so the piece sits on top when the
                 // two coincide (piece already grounded). Toggleable with G.
-                int gy = drop_row(board, cur.s, cur.x, cur.y);
-                if (ghost && gy != cur.y) {
-                    Color gc = COLORS[cur.type+1];
+                int gy = drop_row(g.board, g.cur.s, g.cur.x, g.cur.y);
+                if (g.ghost && gy != g.cur.y) {
+                    Color gc = COLORS[g.cur.type+1];
                     gc.a = 80;
-                    Color go = COLORS[cur.type+1];
+                    Color go = COLORS[g.cur.type+1];
                     go.a = 170;
                     for (int y = 0; y < 4; y++)
                         for (int x = 0; x < 4; x++)
-                            if (cur.s[y][x] && gy+y >= 0) {
-                                DrawRectangle(ox+(cur.x+x)*cell, oy+(gy+y)*cell, cell-1, cell-1, gc);
-                                DrawRectangleLines(ox+(cur.x+x)*cell, oy+(gy+y)*cell, cell-1, cell-1, go);
+                            if (g.cur.s[y][x] && gy+y >= 0) {
+                                DrawRectangle(ox+(g.cur.x+x)*cell, oy+(gy+y)*cell, cell-1, cell-1, gc);
+                                DrawRectangleLines(ox+(g.cur.x+x)*cell, oy+(gy+y)*cell, cell-1, cell-1, go);
                             }
                 }
                 // Highlight rows that a hard drop in the current spot would
                 // clear: the landing rows painted translucent white so a
                 // pending line clear reads at a glance. Gated with the ghost.
-                if (ghost)
+                if (g.ghost)
                 for (int r = gy; r < gy + 4; r++) {
                     if (r < 0 || r >= ROWS) continue;
                     int full = 1;
                     for (int x = 0; x < COLS && full; x++) {
-                        int filled = board[r][x];
+                        int filled = g.board[r][x];
                         for (int y = 0; y < 4 && !filled; y++) {
-                            int bx = x - cur.x;
-                            if (bx >= 0 && bx < 4 && cur.s[y][bx] && gy + y == r) filled = 1;
+                            int bx = x - g.cur.x;
+                            if (bx >= 0 && bx < 4 && g.cur.s[y][bx] && gy + y == r) filled = 1;
                         }
                         if (!filled) full = 0;
                     }
@@ -511,22 +532,30 @@ int main(void) {
                 }
                 for (int y = 0; y < 4; y++)
                     for (int x = 0; x < 4; x++)
-                        if (cur.s[y][x] && cur.y+y >= 0) {
-                            DrawRectangle(ox+(cur.x+x)*cell, oy+(cur.y+y)*cell, cell-1, cell-1, pc);
-                            DrawRectangleLines(ox+(cur.x+x)*cell, oy+(cur.y+y)*cell, cell-1, cell-1, (Color){0,0,0,120});
+                        if (g.cur.s[y][x] && g.cur.y+y >= 0) {
+                            DrawRectangle(ox+(g.cur.x+x)*cell, oy+(g.cur.y+y)*cell, cell-1, cell-1, pc);
+                            DrawRectangleLines(ox+(g.cur.x+x)*cell, oy+(g.cur.y+y)*cell, cell-1, cell-1, (Color){0,0,0,120});
                         }
             }
 
             DrawText("NEXT", px, oy, fs, RAYWHITE);
-            int ns = SIZES[nextType];
-            for (int y = 0; y < ns; y++)
-                for (int x = 0; x < ns; x++)
-                    if (SHAPES[nextType][y][x])
-                        DrawRectangle(px + x*cell, oy + fs + cell + y*cell, cell-1, cell-1, COLORS[nextType+1]);
+            // Center the piece's bounding box in a 4x2-cell preview box so every
+            // type sits in the same place (the I lives on row 1 of its grid and
+            // used to hang a row low).
+            int ns[4][4];
+            memcpy(ns, SHAPES[g.nextType], sizeof(ns));
+            int nx0, ny0, nx1, ny1;
+            shapeBounds(ns, &nx0, &ny0, &nx1, &ny1);
+            int nox = px + (4 - (nx1 - nx0 + 1)) * cell / 2;
+            int noy = oy + fs + cell + (2 - (ny1 - ny0 + 1)) * cell / 2;
+            for (int y = 0; y < 4; y++)
+                for (int x = 0; x < 4; x++)
+                    if (ns[y][x])
+                        DrawRectangle(nox + (x-nx0)*cell, noy + (y-ny0)*cell, cell-1, cell-1, COLORS[g.nextType+1]);
 
-            DrawText(TextFormat("SCORE %d", score), cell, cell, fs, RAYWHITE);
-            DrawText(TextFormat("LINES %d", lines), cell, cell + fs*2, fs, RAYWHITE);
-            DrawText(TextFormat("LEVEL %d", level), cell, cell + fs*4, fs, RAYWHITE);
+            DrawText(TextFormat("SCORE %d", g.score), cell, cell, fs, RAYWHITE);
+            DrawText(TextFormat("LINES %d", g.lines), cell, cell + fs*2, fs, RAYWHITE);
+            DrawText(TextFormat("LEVEL %d", g.level), cell, cell + fs*4, fs, RAYWHITE);
 
             // Mode badges stacked under the NEXT preview: easy, ghost and
             // cheat show ON/OFF like a switch; autoplay and paused only appear
@@ -535,14 +564,14 @@ int main(void) {
             if (mfs < 10) mfs = 10;
             int my = oy + 5*cell;
             const char *badgeTxt[3] = {
-                easy ? "EASY: ON" : "EASY: OFF",
-                ghost ? "GHOST: ON" : "GHOST: OFF",
-                cheat ? "CHEAT: ON" : "CHEAT: OFF"
+                g.easy ? "EASY: ON" : "EASY: OFF",
+                g.ghost ? "GHOST: ON" : "GHOST: OFF",
+                g.cheat ? "CHEAT: ON" : "CHEAT: OFF"
             };
             Color badgeC[3] = {
-                easy ? (Color){110,235,140,255} : (Color){150,150,170,255},
-                ghost ? (Color){110,235,140,255} : (Color){150,150,170,255},
-                cheat ? (Color){110,235,140,255} : (Color){150,150,170,255}
+                g.easy ? (Color){110,235,140,255} : (Color){150,150,170,255},
+                g.ghost ? (Color){110,235,140,255} : (Color){150,150,170,255},
+                g.cheat ? (Color){110,235,140,255} : (Color){150,150,170,255}
             };
             for (int i = 0; i < 3; i++) {
                 int bw = MeasureText(badgeTxt[i], mfs);
@@ -554,7 +583,7 @@ int main(void) {
 
             // Conditional badges go under the switch-style ones: AUTOPLAY
             // while running, PAUSED (amber, like the lock cue) while halted.
-            if (autoPlay) {
+            if (g.autoPlay) {
                 Color ac = {110,190,255,255};
                 int ay = my + 3*(mfs + 8);
                 int aw = MeasureText("AUTOPLAY", mfs);
@@ -562,7 +591,7 @@ int main(void) {
                 DrawRectangleLinesEx((Rectangle){px-4, ay-4, aw+8, mfs+8}, 1.0f, ac);
                 DrawText("AUTOPLAY", px, ay, mfs, ac);
             }
-            if (paused) {
+            if (g.paused) {
                 Color zc = {255,210,90,255};
                 int zy = my + 4*(mfs + 8);
                 int zw = MeasureText("PAUSED", mfs);
@@ -604,7 +633,7 @@ int main(void) {
                 DrawText(ctl[i][1], colX, ly, cfs, (Color){160,160,180,255});
             }
 
-            if (gameOver) {
+            if (g.gameOver) {
                 DrawRectangle(0, 0, sw, sh, (Color){0,0,0,180});
                 int big = fs * 2;
                 DrawText("GAME OVER", (sw - MeasureText("GAME OVER", big))/2, sh/2 - big, big, RAYWHITE);
