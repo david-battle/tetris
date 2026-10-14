@@ -68,6 +68,22 @@ static void rotate(int s[4][4], int n) {
             s[y][x] = t[y][x];
 }
 
+// Cheat morph: the piece's mirror reflection. J<->L and S<->Z are mirror
+// pairs, so the reflected cells are written to out and the partner type is
+// returned (color follows). I and O are mirror-symmetric, so they're left
+// unchanged; T instead does a 180 turn so a tap still visibly does something.
+static int mirrorShape(int type, int in[4][4], int out[4][4]) {
+    memcpy(out, in, sizeof(int) * 16);
+    if (type == 0 || type == 1) return type;                    // I, O
+    if (type == 2) { rotate(out, 3); rotate(out, 3); return type; } // T
+    int n = SIZES[type], t[4][4] = {{0}};
+    for (int y = 0; y < n; y++)
+        for (int x = 0; x < n; x++)
+            t[y][n-1-x] = in[y][x];
+    memcpy(out, t, sizeof(t));
+    return type == 3 ? 4 : type == 4 ? 3 : type == 5 ? 6 : 5;   // L/J, S/Z
+}
+
 // Column bx keeps every occupied cell of s inside the well.
 static int colFits(int s[4][4], int bx) {
     for (int y = 0; y < 4; y++)
@@ -236,6 +252,7 @@ int main(void) {
     int easy = 0;
     int ghost = 1;
     int autoPlay = 0;
+    int cheat = 0;
     float timer = 0.0f, gravity = 0.8f;
     float dropRepeat = 0.0f;
 
@@ -268,6 +285,7 @@ int main(void) {
             if (!easy) autoPlay = 0;
         }
         if (IsKeyPressed(KEY_G)) ghost = !ghost;
+        if (IsKeyPressed(KEY_C)) cheat = !cheat;
         if (IsKeyPressed(KEY_A)) {
             autoPlay = !autoPlay;
             if (autoPlay) { easy = 1; ghost = 0; }
@@ -314,6 +332,33 @@ int main(void) {
                         cur.x = nx; cur.y = ny;
                         PlaySound(sRot); break;
                     }
+                }
+            }
+
+            // Hint: snap the live piece to the easy-mode best placement
+            // (orientation + column) without dropping it. Skipped if that
+            // placement would overlap the stack at the current height, which
+            // can happen when the piece has already fallen partway.
+            if (IsKeyPressed(KEY_H)) {
+                Piece best = cur;
+                easyBestDrop(board, &best, nextType);
+                if (!collide(board, best.s, best.x, cur.y)) {
+                    cur = best;
+                    PlaySound(sRot);
+                }
+            }
+
+            // Cheat: with cheat mode on, either Ctrl key morphs the live piece
+            // into its mirror partner in place (J<->L, S<->Z, color follows; T
+            // spins 180, I/O unchanged). Skipped if the mirrored shape
+            // wouldn't fit where the piece currently is.
+            if (cheat && (IsKeyPressed(KEY_LEFT_CONTROL) || IsKeyPressed(KEY_RIGHT_CONTROL))) {
+                int t[4][4];
+                int nt = mirrorShape(cur.type, cur.s, t);
+                if (!collide(board, t, cur.x, cur.y)) {
+                    memcpy(cur.s, t, sizeof(t));
+                    cur.type = nt;
+                    PlaySound(sRot);
                 }
             }
 
@@ -483,20 +528,23 @@ int main(void) {
             DrawText(TextFormat("LINES %d", lines), px, oy + boardH - fs*4, fs, RAYWHITE);
             DrawText(TextFormat("LEVEL %d", level), px, oy + boardH - fs*3, fs, RAYWHITE);
 
-            // Mode badges stacked under the NEXT preview: easy and ghost show
-            // ON/OFF like a switch; autoplay only appears while active.
+            // Mode badges stacked under the NEXT preview: easy, ghost and
+            // cheat show ON/OFF like a switch; autoplay and paused only appear
+            // while active/halted.
             int mfs = fs * 2 / 3;
             if (mfs < 10) mfs = 10;
             int my = oy + 5*cell;
-            const char *badgeTxt[2] = {
+            const char *badgeTxt[3] = {
                 easy ? "EASY: ON" : "EASY: OFF",
-                ghost ? "GHOST: ON" : "GHOST: OFF"
+                ghost ? "GHOST: ON" : "GHOST: OFF",
+                cheat ? "CHEAT: ON" : "CHEAT: OFF"
             };
-            Color badgeC[2] = {
+            Color badgeC[3] = {
                 easy ? (Color){110,235,140,255} : (Color){150,150,170,255},
-                ghost ? (Color){110,235,140,255} : (Color){150,150,170,255}
+                ghost ? (Color){110,235,140,255} : (Color){150,150,170,255},
+                cheat ? (Color){110,235,140,255} : (Color){150,150,170,255}
             };
-            for (int i = 0; i < 2; i++) {
+            for (int i = 0; i < 3; i++) {
                 int bw = MeasureText(badgeTxt[i], mfs);
                 int by = my + i * (mfs + 8);
                 DrawRectangle(px-4, by-4, bw+8, mfs+8, (Color){0,0,0,140});
@@ -504,16 +552,28 @@ int main(void) {
                 DrawText(badgeTxt[i], px, by, mfs, badgeC[i]);
             }
 
+            // Conditional badges go under the switch-style ones: AUTOPLAY
+            // while running, PAUSED (amber, like the lock cue) while halted.
             if (autoPlay) {
                 Color ac = {110,190,255,255};
-                int ay = my + 2*(mfs + 8);
+                int ay = my + 3*(mfs + 8);
                 int aw = MeasureText("AUTOPLAY", mfs);
                 DrawRectangle(px-4, ay-4, aw+8, mfs+8, (Color){0,0,0,140});
                 DrawRectangleLinesEx((Rectangle){px-4, ay-4, aw+8, mfs+8}, 1.0f, ac);
                 DrawText("AUTOPLAY", px, ay, mfs, ac);
             }
+            if (paused) {
+                Color zc = {255,210,90,255};
+                int zy = my + 4*(mfs + 8);
+                int zw = MeasureText("PAUSED", mfs);
+                DrawRectangle(px-4, zy-4, zw+8, mfs+8, (Color){0,0,0,140});
+                DrawRectangleLinesEx((Rectangle){px-4, zy-4, zw+8, mfs+8}, 1.0f, zc);
+                DrawText("PAUSED", px, zy, mfs, zc);
+            }
 
-            int cy = oy + 7*cell;
+            // CONTROLS starts low enough that all five badge slots above it
+            // never collide.
+            int cy = oy + 9*cell;
             DrawText("CONTROLS", px, cy, fs, (Color){180,180,200,255});
             static const char *ctl[][2] = {
                 { "LEFT / RIGHT", "move" },
@@ -524,18 +584,21 @@ int main(void) {
                 { "E",           "easy mode" },
                 { "G",           "ghost" },
                 { "A",           "autoplay" },
+                { "H",           "hint" },
+                { "C",           "cheat mode" },
+                { "CTRL",        "mirror (cheat)" },
                 { "ENTER",       "restart" },
                 { "ESC",         "quit" },
             };
             int cfs = fs * 2 / 3;
             if (cfs < 10) cfs = 10;
             int colX = 0;
-            for (int i = 0; i < 10; i++) {
+            for (int i = 0; i < 13; i++) {
                 int w = MeasureText(ctl[i][0], cfs);
                 if (w > colX) colX = w;
             }
             colX += px + cfs;
-            for (int i = 0; i < 10; i++) {
+            for (int i = 0; i < 13; i++) {
                 int ly = cy + fs + i * (cfs + cfs/3);
                 DrawText(ctl[i][0], px, ly, cfs, RAYWHITE);
                 DrawText(ctl[i][1], colX, ly, cfs, (Color){160,160,180,255});

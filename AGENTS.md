@@ -25,11 +25,17 @@ repo. Keep changes small.
   orientation/column with the best two-piece lookahead — the current piece is
   hard-dropped straight down, then the next piece is searched the same way
   from that result, and the pair is scored on its final board (clears good,
-  tall pile / bumpiness / deeply buried holes bad). `tryPlace()`/`clearLines()`
+  tall pile / bumpiness / deeply buried holes bad). `H` (hint) snaps the live
+  piece to the easy-mode best placement (orientation + column) without
+  dropping it, unless that would overlap the stack at its current height.
+  `tryPlace()`/`clearLines()`
   mutate the scratch boards they are given while simulating. Autoplay (`A`)
   builds on easy mode: toggling it on forces easy on and the ghost off, then
   hard-drops the easy-best placement every 0.125s; turning easy off (`E`)
-  clears autoplay too.
+  clears autoplay too. Cheat mode (`C`, shown on screen): while on, either
+  Ctrl key morphs the live piece into its mirror partner in place — J/L/S/Z
+  swap (J↔L, S↔Z) with the partner's color, T spins 180 for feedback, I/O are
+  unchanged (all skipped if the mirror wouldn't fit).
 - `resources/` — audio only: `buttonfx.wav` (move), `ping_send.wav` (rotate),
   `coin.wav` (lock), `hit_splat.wav` (line clear), `boom.wav` (game over), and
   `country.mp3` (looped BGM). Paths are relative, so run the binary from the
